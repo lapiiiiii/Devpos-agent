@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>研发效能AI Agent平台</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Microsoft YaHei', sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        header {
+            text-align: center;
+            padding: 30px 0 20px;
+        }
+        header h1 {
+            font-size: 22px;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        header p {
+            color: #666;
+            font-size: 14px;
+        }
+        .chat-container {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .chat-messages {
+            padding: 20px;
+            min-height: 350px;
+            max-height: 50vh;
+            overflow-y: auto;
+            border-bottom: 1px solid #eee;
+        }
+        .message {
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+        .message.user {
+            text-align: right;
+        }
+        .message-content {
+            display: inline-block;
+            padding: 10px 14px;
+            border-radius: 8px;
+            max-width: 80%;
+            line-height: 1.5;
+            font-size: 14px;
+        }
+        .message.user .message-content {
+            background: #1890ff;
+            color: #fff;
+        }
+        .message.agent .message-content {
+            background: #f0f0f0;
+            color: #333;
+        }
+        .message.error .message-content {
+            background: #fff1f0;
+            color: #cf1322;
+        }
+        .message-meta {
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+            padding: 0 4px;
+        }
+        .typing-indicator {
+            padding: 10px 14px;
+            color: #999;
+            font-size: 14px;
+        }
+        .quick-actions {
+            display: flex;
+            gap: 8px;
+            padding: 15px;
+            background: #fafafa;
+            border-bottom: 1px solid #eee;
+            flex-wrap: wrap;
+        }
+        .quick-btn {
+            background: #fff;
+            border: 1px solid #d9d9d9;
+            color: #333;
+            padding: 8px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .quick-btn:hover {
+            border-color: #1890ff;
+            color: #1890ff;
+        }
+        .input-area {
+            display: flex;
+            padding: 15px;
+            gap: 10px;
+        }
+        .input-area input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            font-size: 14px;
+            outline: none;
+        }
+        .input-area input:focus {
+            border-color: #1890ff;
+        }
+        .input-area button {
+            padding: 10px 24px;
+            background: #1890ff;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .input-area button:hover {
+            background: #40a9ff;
+        }
+        .input-area button:disabled {
+            background: #d9d9d9;
+            cursor: not-allowed;
+        }
+        .intent-badge {
+            display: inline-block;
+            background: #e6f7ff;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            color: #1890ff;
+            margin-bottom: 6px;
+        }
+        .tools-used {
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: #999;
+        }
+        .empty-state h3 {
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>研发效能AI Agent平台</h1>
+            <p>缺陷分析 · 代码评审 · CI/CD监控</p>
+        </header>
+
+        <div class="chat-container">
+            <div class="chat-messages" id="chatMessages">
+                <div class="empty-state">
+                    <h3>👋 开始对话</h3>
+                    <p>输入问题或点击下方快捷问题</p>
+                </div>
+            </div>
+
+            <div class="quick-actions">
+                <button class="quick-btn" onclick="sendQuick('本周新增了多少Bug？')">Bug统计</button>
+                <button class="quick-btn" onclick="sendQuick('有哪些PR需要评审？')">代码评审</button>
+                <button class="quick-btn" onclick="sendQuick('最近构建成功了吗？')">构建查询</button>
+                <button class="quick-btn" onclick="sendQuick('生成本周研发效能报表')">效能报表</button>
+                <button class="quick-btn" onclick="sendQuick('分析最近Bug的根因')">缺陷分析</button>
+            </div>
+
+            <div class="input-area">
+                <input type="text" id="userInput" placeholder="输入你的问题..." onkeypress="handleKeyPress(event)">
+                <button id="sendBtn" onclick="sendMessage()">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8004';
+        let sessionId = localStorage.getItem('sessionId') || generateSessionId();
+        localStorage.setItem('sessionId', sessionId);
+
+        function generateSessionId() {
+            return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const message = input.value.trim();
+            if (!message) return;
+
+            const messagesDiv = document.getElementById('chatMessages');
+
+            if (messagesDiv.querySelector('.empty-state')) {
+                messagesDiv.innerHTML = '';
+            }
+
+            addMessage('user', message);
+            input.value = '';
+            setLoading(true);
+
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: sessionId
+                    })
+                });
+
+                const data = await response.json();
+
+                let displayText = data.message || data.response || JSON.stringify(data, null, 2);
+                if (typeof displayText === 'object') {
+                    displayText = JSON.stringify(displayText, null, 2);
+                }
+                addMessage('agent', displayText, data);
+            } catch (error) {
+                addMessage('error', '连接失败: ' + error.message);
+            }
+
+            setLoading(false);
+        }
+
+        function sendQuick(message) {
+            document.getElementById('userInput').value = message;
+            sendMessage();
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function addMessage(type, content, data = null) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message ' + type;
+
+            let html = '';
+            if (type === 'agent' && data) {
+                if (data.intent) {
+                    html += `<span class="intent-badge">意图: ${data.intent}</span> `;
+                }
+                if (data.tools_used && data.tools_used.length > 0) {
+                    html += `<div class="tools-used">调用工具: ${data.tools_used.join(', ')}</div>`;
+                }
+            }
+
+            html += `<div class="message-content">${escapeHtml(content)}</div>`;
+
+            if (type === 'agent' && data && data.success === false) {
+                html = `<div class="message-content">⚠️ ${escapeHtml(content)}</div>`;
+                msgDiv.className = 'message error';
+            }
+
+            msgDiv.innerHTML = html;
+            messagesDiv.appendChild(msgDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function setLoading(loading) {
+            const btn = document.getElementById('sendBtn');
+            const input = document.getElementById('userInput');
+
+            if (loading) {
+                btn.disabled = true;
+                btn.textContent = '思考中...';
+
+                const messagesDiv = document.getElementById('chatMessages');
+                const typingDiv = document.createElement('div');
+                typingDiv.className = 'message agent';
+                typingDiv.id = 'typingIndicator';
+                typingDiv.innerHTML = `<div class="typing-indicator">正在思考...</div>`;
+                messagesDiv.appendChild(typingDiv);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            } else {
+                btn.disabled = false;
+                btn.textContent = '发送';
+                const typing = document.getElementById('typingIndicator');
+                if (typing) typing.remove();
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        document.getElementById('userInput').focus();
+    </script>
+</body>
+</html>
