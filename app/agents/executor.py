@@ -27,6 +27,8 @@ class ToolExecutor:
         self._tools["github_get_commits"] = self._github_get_commits
         self._tools["github_get_pulls"] = self._github_get_pulls
         self._tools["github_get_workflow_runs"] = self._github_get_workflow_runs
+        self._tools["github_scan_pr_security"] = self._github_scan_pr_security
+        self._tools["github_get_pr_diff"] = self._github_get_pr_diff
         self._tools["cicd_get_build_history"] = self._cicd_get_build_history
         self._tools["cicd_get_workflow_logs"] = self._cicd_get_workflow_logs
         self._tools["cicd_get_metrics"] = self._cicd_get_metrics
@@ -144,6 +146,27 @@ class ToolExecutor:
                 limit=task.get("params", {}).get("limit", 30),
             )
         return [{"mock": "github workflow runs data"}]
+
+    async def _github_scan_pr_security(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        if self._github_client:
+            pr_number = task.get("params", {}).get("pr_number", 1)
+            return await self._github_client.scan_pr_security(pr_number)
+        return {
+            "pr_number": 1,
+            "total_findings": 3,
+            "risk_level": "high",
+            "findings": [
+                {"type": "API_Token", "matched": "sk-1234567890abcdef", "context": "...API_KEY = \"sk-1234567890abcdef\"..."},
+                {"type": "密码", "matched": "password123", "context": "...password = \"admin123\"..."},
+                {"type": "手机号", "matched": "13800138000", "context": "...phone = \"13800138000\"..."},
+            ],
+        }
+
+    async def _github_get_pr_diff(self, task: Dict[str, Any]) -> str:
+        if self._github_client:
+            pr_number = task.get("params", {}).get("pr_number", 1)
+            return await self._github_client.get_pr_diff(pr_number)
+        return "Mock PR diff content..."
 
     async def _cicd_get_build_history(self, task: Dict[str, Any]) -> List[Dict]:
         if self._cicd_client:

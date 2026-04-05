@@ -97,6 +97,23 @@ def register_default_tools():
     )
 
     tool_registry.register(
+        name="github_scan_pr_security",
+        description="Scan PR for sensitive information leaks (env, passwords, tokens, keys)",
+        tool_type=ToolType.GITHUB,
+        parameters={"pr_number": "required"},
+    )
+
+    tool_registry.register(
+        name="github_get_pr_diff",
+        description="Get PR diff content for code review",
+        tool_type=ToolType.GITHUB,
+        parameters={"pr_number": "required"},
+    )
+
+    tool_registry.register_intent_mapping("MR安全扫描", ["github_scan_pr_security"])
+    tool_registry.register_intent_mapping("周报生成", ["jira_get_bugs", "github_get_pulls", "cicd_get_metrics"])
+
+    tool_registry.register(
         name="jira_get_issues",
         description="Get Jira issues with optional project and status filters",
         tool_type=ToolType.JIRA,

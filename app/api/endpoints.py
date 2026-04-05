@@ -198,6 +198,11 @@ async def _generate_llm_response(result: Dict[str, Any], original_question: str)
     intent = result.get("intent", "unknown")
     step_results = result.get("step_results", [])
 
+    if intent == "MR安全扫描":
+        return _generate_security_report(step_results, original_question)
+    elif intent == "周报生成":
+        return _generate_weekly_report(step_results, original_question)
+
     data_summary = []
     for sr in step_results:
         if sr.get("success"):
@@ -225,6 +230,98 @@ async def _generate_llm_response(result: Dict[str, Any], original_question: str)
         return response
 
     return _format_chat_result(result)
+
+
+def _generate_security_report(step_results: List[Dict], original_question: str) -> str:
+    for sr in step_results:
+        if sr.get("success") and sr.get("tool") == "github_scan_pr_security":
+            scan_result = sr.get("result", {})
+            findings = scan_result.get("findings", [])
+            risk_level = scan_result.get("risk_level", "unknown")
+
+            if not findings:
+                return "✅ **MR安全扫描通过**\n\n未检测到敏感信息泄露，可以安全合并。"
+
+            report_lines = ["🚨 **MR安全扫描发现风险**\n"]
+            report_lines.append(f"**风险等级：{'🔴 高危' if risk_level == 'high' else '🟡 中危' if risk_level == 'medium' else '🟢 低危'}**\n")
+            report_lines.append(f"**发现 {len(findings)} 个问题：**\n")
+
+            for i, finding in enumerate(findings, 1):
+                report_lines.append(f"**{i}. {finding.get('type', '未知类型')}**")
+                report_lines.append(f"   匹配内容：`{finding.get('matched', 'N/A')}`")
+                report_lines.append("")
+
+            report_lines.append("**建议：** 请在合并前处理以上敏感信息泄露问题。")
+            return "\n".join(report_lines)
+
+    return "⚠️ 安全扫描完成，但未获取到扫描结果。"
+
+
+def _generate_weekly_report(step_results: List[Dict], original_question: str) -> str:
+    bugs = []
+    pulls = []
+    metrics = {}
+
+    for sr in step_results:
+        if not sr.get("success"):
+            continue
+        result = sr.get("result", {})
+        tool = sr.get("tool", "")
+
+        if tool == "jira_get_bugs" and isinstance(result, list):
+            bugs = result
+        elif tool == "github_get_pulls" and isinstance(result, list):
+            pulls = result
+        elif tool == "cicd_get_metrics" and isinstance(result, dict):
+            metrics = result
+
+    from datetime import datetime, timedelta
+    week_ago = datetime.now() - timedelta(days=7)
+
+    week_bugs = []
+    for b in bugs:
+        created = b.get("created", "")
+        if created:
+            try:
+                d = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                if d.replace(tzinfo=None) >= week_ago:
+                    week_bugs.append(b)
+            except:
+                pass
+
+    open_prs = [p for p in pulls if p.get("state") == "open"]
+    merged_prs = [p for p in pulls if p.get("merged")]
+    success_rate = metrics.get("success_rate", 0)
+
+    report_lines = ["📊 **本周研发效能周报**\n"]
+    report_lines.append(f"📅 统计周期：最近7天\n")
+
+    report_lines.append("\n**🐛 Bug统计**")
+    report_lines.append(f"- 本周新增：{len(week_bugs)} 个")
+    report_lines.append(f"- 总Bug数：{len(bugs)} 个")
+    if week_bugs:
+        high_priority = [b for b in week_bugs if "high" in str(b.get("labels", [])).lower() or "critical" in str(b.get("labels", [])).lower()]
+        if high_priority:
+            report_lines.append(f"- 高优先级：{len(high_priority)} 个")
+
+    report_lines.append("\n**🔀 PR统计**")
+    report_lines.append(f"- 待评审：{len(open_prs)} 个")
+    report_lines.append(f"- 已合并：{len(merged_prs)} 个")
+
+    report_lines.append("\n**🔧 构建统计**")
+    report_lines.append(f"- 构建成功率：{success_rate}%")
+    if metrics.get("total_runs"):
+        report_lines.append(f"- 总构建次数：{metrics.get('total_runs')} 次")
+
+    report_lines.append("\n**📈 总体评价**")
+    if success_rate >= 80 and len(week_bugs) <= 5:
+        report_lines.append("✅ 团队表现良好，构建稳定")
+    elif success_rate >= 60:
+        report_lines.append("🟡 需要关注构建稳定性")
+    else:
+        report_lines.append("🔴 需要重点关注构建和质量问题")
+
+    return "\n".join(report_lines)
 
 
 @router.get("/sessions/{session_id}/history")
