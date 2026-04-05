@@ -98,6 +98,57 @@ class GitHubClient:
             logger.error(f"Error fetching pulls: {e}")
             return self._mock_pulls()
 
+    async def get_pr_diff(self, pr_number: int) -> str:
+        repo = self.get_repo()
+        if not repo:
+            return self._mock_pr_diff()
+        try:
+            pr = repo.get_pull(pr_number)
+            files = pr.get_files()
+            diff_content = []
+            for f in files:
+                diff_content.append(f"### File: {f.filename}\n```diff\n{f.patch}\n```")
+            return "\n\n".join(diff_content)
+        except Exception as e:
+            logger.error(f"Error fetching PR diff: {e}")
+            return self._mock_pr_diff()
+
+    async def scan_pr_security(self, pr_number: int) -> Dict[str, Any]:
+        diff = await self.get_pr_diff(pr_number)
+
+        sensitive_patterns = {
+            "env文件": r"\.env",
+            "密码": r"password\s*=\s*['\"][^'\"]+['\"]",
+            "API_Token": r"api[_-]?token\s*=\s*['\"][^'\"]+['\"]",
+            "GitHub_Token": r"ghp_[a-zA-Z0-9]+|github_pat_[a-zA-Z0-9]+",
+            "AWS密钥": r"AKIA[0-9A-Z]{16}",
+            "私钥": r"-----BEGIN.*PRIVATE KEY-----",
+            "数据库连接": r"(mongodb|mysql|postgresql)://[^@]+@",
+            "内部IP": r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",
+            "身份证": r"\d{17}[\dXx]",
+            "手机号": r"1[3-9]\d{9}",
+            "邮箱": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+        }
+
+        findings = []
+        for pattern_name, pattern in sensitive_patterns.items():
+            import re
+            matches = re.finditer(pattern, diff, re.IGNORECASE)
+            for match in matches:
+                context = diff[max(0, match.start()-50):min(len(diff), match.end()+50)]
+                findings.append({
+                    "type": pattern_name,
+                    "matched": match.group(),
+                    "context": f"...{context}...",
+                })
+
+        return {
+            "pr_number": pr_number,
+            "total_findings": len(findings),
+            "risk_level": "high" if len(findings) > 0 else "low",
+            "findings": findings,
+        }
+
     async def get_workflow_runs(self, limit: int = 30) -> List[Dict[str, Any]]:
         repo = self.get_repo()
         if not repo:
@@ -162,6 +213,25 @@ class GitHubClient:
                 "url": "https://github.com/example/repo/commit/def456",
             },
         ]
+
+    def _mock_pr_diff(self) -> str:
+        return """### File: config.py
+```diff
++ API_KEY = "sk-1234567890abcdef"
++ password = "admin123"
+```
+
+### File: .env
+```diff
++ DATABASE_URL=mysql://user:password123@localhost:3306/db
++ SECRET_KEY=my-secret-key-12345
+```
+
+### File: utils.py
+```diff
++ phone = "13800138000"
++ email = "user@company.internal.com"
+```"""
 
     def _mock_pulls(self) -> List[Dict[str, Any]]:
         return [
